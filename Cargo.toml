@@ -5,3 +5,5 @@ authors = ["Luis Fernando Batels <luisfbatels@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+flate2 = "1.0"
+tar = "0.4"
