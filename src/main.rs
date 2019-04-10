@@ -3,34 +3,65 @@
 ///
 /// Main of the application
 ///
-/// Copyright 2018 Luis Fernando Batels <luisfbatels@gmail.com>
+/// Copyright 2019 Luis Fernando Batels <luisfbatels@gmail.com>
 ///
 
-
-extern crate flate2;
-extern crate tar;
-
-use flate2::read::GzDecoder;
+#[macro_use]
+extern crate json;
 
 use std::fs::File;
-use std::io::Read;
+use std::path::Path;
+use std::io::BufReader;
+
+use flate2::read::GzDecoder;
 use tar::Archive;
+use sled::Db;
+
+const DB_INDEX: &str = "/var/db/blitzae";
 
 fn main() {
 
-    let mut buffer : Vec<u8> = Vec::new();
-    let mut archive = File::open("/tmp/testes.tar.gz".to_string()).unwrap();
-    archive.read_to_end(&mut buffer).unwrap();
+    let db = Db::start_default(DB_INDEX).unwrap();
 
-    let mut decoder = GzDecoder::new(&buffer[..]);
-    let mut decoded_buffer : Vec<u8> = Vec::new();
+    let file_tar = "/tmp/testes.tar.gz".to_string();
+    let path = Path::new(&file_tar);
+    let archive = File::open(path).unwrap();
 
-    decoder.read_to_end(&mut decoded_buffer).unwrap();
+    let files = db.open_tree(path.file_name().unwrap().to_str().unwrap().to_string())
+                .unwrap();
 
-    let mut archive = Archive::new(&decoded_buffer[..]);
+    if !files.is_empty() {
 
-    for file in archive.entries().unwrap() {
-        println!("{:?}", file.unwrap().header());
+        for idx in files.iter().keys() {
+            println!("{:?}", std::str::from_utf8(&idx.unwrap()));
+        }
+
+        return;
     }
+
+    let buffer_archive = BufReader::new(archive);
+
+    let decoder = GzDecoder::new(buffer_archive);
+    let buffer_decoder = BufReader::new(decoder);
+
+    let mut tar = Archive::new(buffer_decoder);
+
+    for file in tar.entries().unwrap() {
+        let header = file.unwrap().header().clone();
+        let file_path = header.path().unwrap().to_str().unwrap().to_string();
+
+        let data = object!{
+            "size" => header.size().unwrap(),
+            "mtime" => header.mtime().unwrap(),
+            "file_name" => header.path().unwrap().file_name().unwrap().to_str().unwrap().to_string(),
+            "path" => file_path.clone()
+        };
+
+        files.set(file_path.as_bytes(), data.dump().as_bytes().to_vec())
+            .expect("Error on create index for a file");
+    }
+
+    db.flush()
+     .expect("Error on flush db");
 
 }
