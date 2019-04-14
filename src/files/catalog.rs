@@ -26,6 +26,23 @@ impl Catalog {
     // Index the content of compressed file
     pub fn catalog_file(&mut self, path: &Path) {
 
+        println!("Indexing {}...", path.display());
+
+        if !path.is_file() {
+            println!("Is not a file {}. Skiping...", path.display());
+            return;
+        }
+
+        if !Catalog::path_to_string(path, false).ends_with(".tar.gz") {
+            println!("Is not a tar.gz file {}. Skiping...", path.display());
+            return;
+        }
+
+        if self.is_indexed(path) {
+            println!("Already indexed {}. Skiping...", path.display());
+            return;
+        }
+
         let archive = File::open(path);
 
         if let Err(e) = archive {
@@ -52,22 +69,12 @@ impl Catalog {
                 .header()
                 .clone();
 
-            let full_path = header.path()
+            let full_path = &header.path()
                 .expect("Can't get the full path");
 
-            let full_path_str = full_path.to_str()
-                .expect("Can't get the string of full path")
-                .to_string();
-
-            let file_name = full_path.file_name()
-                .expect("Can't get the file name")
-                .to_str()
-                .expect("Can't get the string of file name")
-                .to_string();
-
             let indexed_file = IndexedFile {
-                full_path: full_path_str.clone(),
-                file_name: file_name.clone(),
+                full_path: Catalog::path_to_string(full_path, true),
+                file_name: Catalog::path_to_string(full_path, false),
                 mtime: header.mtime()
                     .expect("Can't determine de mtime"),
                 size: header.size()
@@ -78,25 +85,21 @@ impl Catalog {
                 .expect("Error on Serialize the file")
                 .to_string();
 
-            tree.set(full_path_str.as_bytes(), data.as_bytes().to_vec())
+            tree.set(Catalog::path_to_string(full_path, true).as_bytes(), data.as_bytes().to_vec())
                 .expect("Error on create index for a file");
         }
 
         self.db.flush()
          .expect("Error on flush db");
+
+        println!("Indexing {}...OK", path.display());
     }
 
     // Return the sled Tree object for access the indexed content
     // of a file
     fn get_tree(&mut self, path: &Path) -> Arc<Tree> {
 
-        let file_name = path.file_name()
-            .expect("Can't get the file name")
-            .to_str()
-            .expect("Can't get the string of file name")
-            .to_string();
-
-        let files = self.db.open_tree(file_name)
+        let files = self.db.open_tree(Catalog::path_to_string(path, false))
                 .expect("Can't open the file tree");
 
         return files;
@@ -132,5 +135,37 @@ impl Catalog {
         }
 
         return false;
+    }
+
+    // Burn/remove the indexed content, if exists, of the file tar
+    pub fn burn_catalog(&mut self, path: &Path) {
+
+        println!("Burning {}...", path.display());
+
+        if !self.is_indexed(path) {
+            println!("Not indexed {}. Skiping...", path.display());
+            return;
+        }
+
+        self.db.drop_tree(Catalog::path_to_string(path, false).as_bytes())
+            .expect("Can't drop the file tree");
+
+        println!("Burning {}...OK", path.display());
+    }
+
+    // Simplify the path -> string
+    fn path_to_string(path: &Path, full: bool) -> String {
+
+        if full {
+            return path.to_str()
+                .expect("Can't get the string of full path")
+                .to_string();
+        }
+
+        return path.file_name()
+            .expect("Can't get the file name")
+            .to_str()
+            .expect("Can't get the string of file name")
+            .to_string();
     }
 }
