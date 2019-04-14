@@ -59,7 +59,7 @@ impl Catalog {
                 .expect("Can't get the string of full path")
                 .to_string();
 
-            let file_path = full_path.file_name()
+            let file_name = full_path.file_name()
                 .expect("Can't get the file name")
                 .to_str()
                 .expect("Can't get the string of file name")
@@ -67,7 +67,7 @@ impl Catalog {
 
             let indexed_file = IndexedFile {
                 full_path: full_path_str.clone(),
-                file_name: file_path.clone(),
+                file_name: file_name.clone(),
                 mtime: header.mtime()
                     .expect("Can't determine de mtime"),
                 size: header.size()
@@ -120,5 +120,17 @@ impl Catalog {
         }
 
         return files;
+    }
+
+    // Return if the tar is already indexed
+    pub fn is_indexed(&mut self, path: &Path) -> bool {
+
+        let tree = self.get_tree(path);
+
+        for _val in tree.iter().values() {
+            return true;
+        }
+
+        return false;
     }
 }
