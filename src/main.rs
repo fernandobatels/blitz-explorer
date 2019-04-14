@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::sync::mpsc::channel;
 use std::fs;
+use std::env;
 
 extern crate notify;
 
@@ -21,9 +22,14 @@ mod files;
 use files::catalog::Catalog;
 
 const DB_INDEX: &str = "/var/db/blitzae";
-const WATCH_DIR: &str = "/tmp/subtemp";
 
 fn main() {
+
+    let input_folder_str = env::args().nth(1)
+        .expect("Argument 1 needs to be the input folder");
+
+    let input_folder = fs::read_dir(Path::new(&input_folder_str))
+        .expect("Error on read the input folder");
 
     let db = Db::start_default(DB_INDEX)
         .expect("Error on start the index database");
@@ -34,9 +40,6 @@ fn main() {
 
     let mut catalog = Catalog { db: db };
 
-    let input_folder = fs::read_dir(Path::new(WATCH_DIR))
-        .expect("Error on read the input folder");
-
     // Index all current content
     for entry in input_folder {
         let file_tar = entry
@@ -46,10 +49,10 @@ fn main() {
     }
 
     // Index all new, or changed, content
-    watcher.watch(WATCH_DIR, RecursiveMode::NonRecursive)
+    watcher.watch(input_folder_str.clone(), RecursiveMode::NonRecursive)
         .expect("Failed to watch for changes on the input folder!");
 
-    println!("Waiting for changes in {}...", WATCH_DIR);
+    println!("Waiting for changes in {}...", input_folder_str);
     loop {
         let change = rx.recv()
             .expect("Error on recv the change event");
