@@ -26,27 +26,27 @@ impl Catalog {
     // Index the content of compressed file
     pub fn catalog_file(&mut self, path: &Path) {
 
-        println!("Indexing {}...", path.display());
+        info!("Indexing {}...", path.display());
 
         if !path.is_file() {
-            println!("Is not a file {}. Skiping...", path.display());
+            warn!("Is not a file {}. Skiping...", path.display());
             return;
         }
 
         if !Catalog::path_to_string(path, false).ends_with(".tar.gz") {
-            println!("Is not a tar.gz file {}. Skiping...", path.display());
+            warn!("Is not a tar.gz file {}. Skiping...", path.display());
             return;
         }
 
         if self.is_indexed(path) {
-            println!("Already indexed {}. Skiping...", path.display());
+            warn!("Already indexed {}. Skiping...", path.display());
             return;
         }
 
         let archive = File::open(path);
 
         if let Err(e) = archive {
-            eprintln!("Can't open the file {}: {}", path.display(), e);
+            error!("Can't open the file {}: {}. Skiping...", path.display(), e);
             return;
         }
 
@@ -92,7 +92,7 @@ impl Catalog {
         self.db.flush()
          .expect("Error on flush db");
 
-        println!("Indexing {}...OK", path.display());
+        info!("Indexing {}...OK", path.display());
     }
 
     // Return the sled Tree object for access the indexed content
@@ -140,17 +140,17 @@ impl Catalog {
     // Burn/remove the indexed content, if exists, of the file tar
     pub fn burn_catalog(&mut self, path: &Path) {
 
-        println!("Burning {}...", path.display());
+        info!("Burning {}...", path.display());
 
         if !self.is_indexed(path) {
-            println!("Not indexed {}. Skiping...", path.display());
+            warn!("Not indexed {}. Skiping...", path.display());
             return;
         }
 
         self.db.drop_tree(Catalog::path_to_string(path, false).as_bytes())
             .expect("Can't drop the file tree");
 
-        println!("Burning {}...OK", path.display());
+        info!("Burning {}...OK", path.display());
     }
 
     // Simplify the path -> string

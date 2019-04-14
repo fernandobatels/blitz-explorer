@@ -11,9 +11,14 @@ use std::time::Duration;
 use std::sync::mpsc::channel;
 use std::fs;
 use std::env;
+use std::panic;
 
+#[macro_use]
+extern crate log;
+extern crate simplelog;
 extern crate notify;
 
+use simplelog::{SimpleLogger, LevelFilter, Config};
 use sled::Db;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, DebouncedEvent};
 
@@ -24,6 +29,13 @@ use files::catalog::Catalog;
 const DB_INDEX: &str = "/var/db/blitzae";
 
 fn main() {
+
+    SimpleLogger::init(LevelFilter::Info, Config::default())
+        .expect("Error on start the log");
+
+    panic::set_hook(Box::new(|e| {
+        error!("{}", e);
+    }));
 
     let input_folder_str = env::args().nth(1)
         .expect("Argument 1 needs to be the input folder");
@@ -52,7 +64,7 @@ fn main() {
     watcher.watch(input_folder_str.clone(), RecursiveMode::NonRecursive)
         .expect("Failed to watch for changes on the input folder!");
 
-    println!("Waiting for changes in {}...", input_folder_str);
+    info!("Waiting for changes in {}...", input_folder_str);
     loop {
         let change = rx.recv()
             .expect("Error on recv the change event");
