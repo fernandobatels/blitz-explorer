@@ -12,6 +12,8 @@ use std::sync::mpsc::channel;
 use std::fs;
 use std::env;
 use std::panic;
+use std::thread;
+use std::net::TcpListener;
 
 #[macro_use]
 extern crate log;
@@ -23,10 +25,13 @@ use sled::Db;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, DebouncedEvent};
 
 mod files;
+mod server;
 
 use files::catalog::Catalog;
+use server::request::Request;
 
 const DB_INDEX: &str = "/var/db/blitzae";
+const TCP_BIND: &str = "127.0.0.1:3355";
 
 fn main() {
 
@@ -50,6 +55,9 @@ fn main() {
     let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(10))
         .expect("Error on start the watch service");
 
+    let tcp_listener = TcpListener::bind(TCP_BIND)
+        .expect("Error on bind the tcp port");
+
     let mut catalog = Catalog { db: db };
 
     // Index all current content
@@ -64,31 +72,48 @@ fn main() {
     watcher.watch(input_folder_str.clone(), RecursiveMode::NonRecursive)
         .expect("Failed to watch for changes on the input folder!");
 
-    info!("Waiting for changes in {}...", input_folder_str);
-    loop {
-        let change = rx.recv()
-            .expect("Error on recv the change event");
+    let thread_fs = thread::spawn(move || {
+        info!("Waiting for changes in {}...", input_folder_str);
+        loop {
+            let change = rx.recv()
+                .expect("Error on recv the change event");
 
-        let (change_path, burn_path): (Option<PathBuf>, Option<PathBuf>) = match change {
-            // New file
-            DebouncedEvent::Create(pb) => (Some(pb.clone()), Some(pb)),
-            // File updated
-            DebouncedEvent::Write(pb) => (Some(pb.clone()), Some(pb)),
-            // File removed
-            DebouncedEvent::Remove(pb) => (None, Some(pb)),
-            // File renamed
-            DebouncedEvent::Rename(pb, pb2) => (Some(pb2), Some(pb)),
-            _ => (None, None)
-        };
+            let (change_path, burn_path): (Option<PathBuf>, Option<PathBuf>) = match change {
+                // New file
+                DebouncedEvent::Create(pb) => (Some(pb.clone()), Some(pb)),
+                // File updated
+                DebouncedEvent::Write(pb) => (Some(pb.clone()), Some(pb)),
+                // File removed
+                DebouncedEvent::Remove(pb) => (None, Some(pb)),
+                // File renamed
+                DebouncedEvent::Rename(pb, pb2) => (Some(pb2), Some(pb)),
+                _ => (None, None)
+            };
 
-        // In some cases we need remove the indexed content
-        if let Some(path_buf) = burn_path {
-            catalog.burn_catalog(&path_buf.as_path());
+            // In some cases we need remove the indexed content
+            if let Some(path_buf) = burn_path {
+                catalog.burn_catalog(&path_buf.as_path());
+            }
+
+            // Indexing the new content
+            if let Some(path_buf) = change_path {
+                catalog.catalog_file(&path_buf.as_path());
+            }
         }
+    });
 
-        // Indexing the new content
-        if let Some(path_buf) = change_path {
-            catalog.catalog_file(&path_buf.as_path());
+    let thread_tcp = thread::spawn(move || {
+        info!("Waiting for tcp connections in {}...", TCP_BIND);
+        for stream in tcp_listener.incoming() {
+
+            let client = stream.expect("Error on handle the tcp client");
+
+            Request::handle(client);
         }
-    }
+    });
+
+    thread_fs.join()
+        .expect("Error on filesystem watcher thread");
+    thread_tcp.join()
+        .expect("Error on tcp watcher thread");
 }
