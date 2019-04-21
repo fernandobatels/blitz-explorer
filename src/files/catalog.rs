@@ -7,15 +7,17 @@
 ///
 
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::io::BufReader;
 use std::sync::Arc;
+use std::str;
 
 use flate2::read::GzDecoder;
 use tar::Archive;
 use sled::{Db, Tree};
 
 use super::file::File as IndexedFile;
+use super::file::FileTar;
 
 pub struct Catalog {
    pub db: Db
@@ -24,30 +26,31 @@ pub struct Catalog {
 impl Catalog {
 
     // Index the content of compressed file
-    pub fn catalog_file(&mut self, path: &Path) {
+    pub fn catalog_file(&mut self, path: &Path) -> Option<FileTar> {
 
         info!("Indexing {}...", path.display());
 
         if !path.is_file() {
             warn!("Is not a file {}. Skiping...", path.display());
-            return;
+            return None;
         }
 
-        if !Catalog::path_to_string(path, false).ends_with(".tar.gz") {
+        if !FileTar::path_to_string(path, false).ends_with(".tar.gz") {
             warn!("Is not a tar.gz file {}. Skiping...", path.display());
-            return;
+            return None;
         }
 
-        if self.is_indexed(path) {
+        let ftar = FileTar::from_path(path);
+        if self.is_indexed(&ftar) {
             warn!("Already indexed {}. Skiping...", path.display());
-            return;
+            return None;
         }
 
         let archive = File::open(path);
 
         if let Err(e) = archive {
             error!("Can't open the file {}: {}. Skiping...", path.display(), e);
-            return;
+            return None;
         }
 
         let buffer_archive = BufReader::new(archive.unwrap());
@@ -60,7 +63,7 @@ impl Catalog {
         let entries = tar.entries()
             .expect("Error on get the entries of tar file");
 
-        let tree = self.get_tree(path);
+        let tree = self.get_tree(&ftar);
 
         for file in entries {
 
@@ -73,8 +76,8 @@ impl Catalog {
                 .expect("Can't get the full path");
 
             let indexed_file = IndexedFile {
-                full_path: Catalog::path_to_string(full_path, true),
-                file_name: Catalog::path_to_string(full_path, false),
+                full_path: FileTar::path_to_string(full_path, true),
+                file_name: FileTar::path_to_string(full_path, false),
                 mtime: header.mtime()
                     .expect("Can't determine de mtime"),
                 size: header.size()
@@ -85,7 +88,7 @@ impl Catalog {
                 .expect("Error on Serialize the file")
                 .to_string();
 
-            tree.set(Catalog::path_to_string(full_path, true).as_bytes(), data.as_bytes().to_vec())
+            tree.set(FileTar::path_to_string(full_path, true).as_bytes(), data.as_bytes().to_vec())
                 .expect("Error on create index for a file");
         }
 
@@ -93,29 +96,31 @@ impl Catalog {
          .expect("Error on flush db");
 
         info!("Indexing {}...OK", path.display());
+
+        return Some(ftar);
     }
 
     // Return the sled Tree object for access the indexed content
     // of a file
-    fn get_tree(&mut self, path: &Path) -> Arc<Tree> {
+    fn get_tree(&mut self, tar: &FileTar) -> Arc<Tree> {
 
-        let files = self.db.open_tree(Catalog::path_to_string(path, false))
+        let files = self.db.open_tree(tar.full_path.clone())
                 .expect("Can't open the file tree");
 
         return files;
     }
 
     // Return the indexed files inside of the tar
-    pub fn get_catalog(&mut self, path: &Path) -> Vec<IndexedFile> {
+    pub fn get_catalog(&mut self, tar: &FileTar) -> Vec<IndexedFile> {
 
-        let tree = self.get_tree(path);
+        let tree = self.get_tree(tar);
         let mut files: Vec<IndexedFile> = vec![];
 
         for val in tree.iter().values() {
 
             let uval = val.expect("Error on get the val of indexed file");
 
-            let file = std::str::from_utf8(&uval)
+            let file = str::from_utf8(&uval)
                 .expect("Error on get string ut8 from indexed file");
 
             files.push(serde_json::from_str(&file)
@@ -125,10 +130,27 @@ impl Catalog {
         return files;
     }
 
-    // Return if the tar is already indexed
-    pub fn is_indexed(&mut self, path: &Path) -> bool {
+    // Return the list of indexed files(catalog's)
+    pub fn get_catalogs(&mut self) -> Vec<FileTar> {
+        let mut cats: Vec<FileTar> = vec![];
 
-        let tree = self.get_tree(path);
+        for ucat in self.db.tree_names() {
+
+            let cat = str::from_utf8(&ucat)
+                .expect("Error on get string ut8 from catalog key");
+
+            let path_buf = PathBuf::from(cat);
+
+            cats.push(FileTar::from_path(path_buf.as_path()));
+        }
+
+        cats
+    }
+
+    // Return if the tar is already indexed
+    pub fn is_indexed(&mut self, tar: &FileTar) -> bool {
+
+        let tree = self.get_tree(tar);
 
         for _val in tree.iter().values() {
             return true;
@@ -138,34 +160,18 @@ impl Catalog {
     }
 
     // Burn/remove the indexed content, if exists, of the file tar
-    pub fn burn_catalog(&mut self, path: &Path) {
+    pub fn burn_catalog(&mut self, tar: &FileTar) {
 
-        info!("Burning {}...", path.display());
+        info!("Burning {}...", tar.full_path);
 
-        if !self.is_indexed(path) {
-            warn!("Not indexed {}. Skiping...", path.display());
+        if !self.is_indexed(tar) {
+            warn!("Not indexed {}. Skiping...", tar.full_path);
             return;
         }
 
-        self.db.drop_tree(Catalog::path_to_string(path, false).as_bytes())
+        self.db.drop_tree(tar.full_path.as_bytes())
             .expect("Can't drop the file tree");
 
-        info!("Burning {}...OK", path.display());
-    }
-
-    // Simplify the path -> string
-    fn path_to_string(path: &Path, full: bool) -> String {
-
-        if full {
-            return path.to_str()
-                .expect("Can't get the string of full path")
-                .to_string();
-        }
-
-        return path.file_name()
-            .expect("Can't get the file name")
-            .to_str()
-            .expect("Can't get the string of file name")
-            .to_string();
+        info!("Burning {}...OK", tar.full_path);
     }
 }
