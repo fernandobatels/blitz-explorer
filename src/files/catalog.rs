@@ -20,7 +20,8 @@ use super::file::File as IndexedFile;
 use super::file::FileTar;
 
 pub struct Catalog {
-   pub db: Db
+   pub db: Db,
+   pub cache_extract: String
 }
 
 impl Catalog {
@@ -176,7 +177,13 @@ impl Catalog {
     }
 
     // Extract a file from .tar file
-    pub fn extract_file<T: Write>(ftar: &FileTar, ffile: &IndexedFile, copy_to: &mut BufWriter<T>) -> bool {
+    pub fn extract_file<W: Write>(&self, ftar: &FileTar, ffile: &IndexedFile, copy_to: &mut BufWriter<W>) -> bool {
+
+        let (is_cached, cache) = self.cached_file(ftar, ffile);
+
+        if is_cached {
+            return copy(&mut BufReader::new(cache), copy_to).is_ok();
+        }
 
         let path = Path::new(&ftar.full_path);
         let archive = File::open(path);
@@ -208,10 +215,35 @@ impl Catalog {
 
             if FileTar::path_to_string(full_path, true) == ffile.full_path {
 
-                return copy(&mut BufReader::new(file), copy_to).is_ok();
+                // Make the cache for use in the next requests
+                copy(&mut BufReader::new(file), &mut BufWriter::new(cache))
+                    .expect("Error on make the cache");
+
+                // We get the content from cache
+                return self.extract_file(ftar, ffile, copy_to);
             }
         }
 
         false
+    }
+
+    // Return the cache of indexed file, if exists
+    fn cached_file(&self, ftar: &FileTar, ffile: &IndexedFile) -> (bool, File) {
+
+        let cached_name = format!("{}/{}_{}", self.cache_extract, ftar.file_name, ffile.full_path.replace("/", ""));
+
+        let path = Path::new(&cached_name);
+
+        if path.exists() {
+            let file = File::open(path)
+                .expect("Cant open the cache file");
+
+            return (true, file);
+        }
+
+        let file = File::create(path)
+            .expect("Cant create the cache file");
+
+        (false, file)
     }
 }

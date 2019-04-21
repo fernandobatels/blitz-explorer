@@ -85,7 +85,7 @@ impl Request {
 
                             if file.full_path == name_file.unwrap() {
 
-                                if !Catalog::extract_file(&tar, &file, &mut BufWriter::new(&conn)) {
+                                if !catalog.extract_file(&tar, &file, &mut BufWriter::new(&conn)) {
                                     error!("Error on extract: {}", download);
                                     return;
                                 }

@@ -38,6 +38,7 @@ use server::request::Request;
 
 const DB_INDEX: &str = "/var/db/blitzae";
 const TCP_BIND: &str = "127.0.0.1:3355";
+const CACHE_EXTRACT: &str = "/tmp";
 
 fn main() {
 
@@ -64,7 +65,10 @@ fn main() {
     let tcp_listener = TcpListener::bind(TCP_BIND)
         .expect("Error on bind the tcp port");
 
-    let catalog = Arc::new(Mutex::new(Catalog { db: db }));
+    let catalog = Arc::new(Mutex::new(Catalog {
+        db: db,
+        cache_extract: CACHE_EXTRACT.to_string()
+    }));
 
     // Index all current content
     for entry in input_folder {
