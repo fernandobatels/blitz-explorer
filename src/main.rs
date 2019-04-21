@@ -29,12 +29,14 @@ use simplelog::{SimpleLogger, LevelFilter, Config};
 use sled::Db;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, DebouncedEvent};
 
-mod files;
-mod server;
+mod catalog;
+mod tcp;
+mod filesystem;
 
-use files::catalog::Catalog;
-use files::file::FileTar;
-use server::request::Request;
+use catalog::catalog::Catalog;
+use catalog::file::FileTar;
+use tcp::request::Request;
+use filesystem::filesystem::Filesystem;
 
 const DB_INDEX: &str = "/var/db/blitzae";
 const TCP_BIND: &str = "127.0.0.1:3355";

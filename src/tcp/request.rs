@@ -9,7 +9,7 @@
 use std::net::{TcpStream, SocketAddr};
 use std::io::{BufReader, BufRead, Write, BufWriter};
 
-use files::catalog::Catalog;
+use catalog::catalog::Catalog;
 
 pub struct Request {
 }
