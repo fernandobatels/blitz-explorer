@@ -8,7 +8,7 @@
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::io::BufReader;
+use std::io::{BufReader, BufWriter, Write, copy};
 use std::sync::Arc;
 use std::str;
 
@@ -173,5 +173,45 @@ impl Catalog {
             .expect("Can't drop the file tree");
 
         info!("Burning {}...OK", tar.full_path);
+    }
+
+    // Extract a file from .tar file
+    pub fn extract_file<T: Write>(ftar: &FileTar, ffile: &IndexedFile, copy_to: &mut BufWriter<T>) -> bool {
+
+        let path = Path::new(&ftar.full_path);
+        let archive = File::open(path);
+
+        if let Err(e) = archive {
+            error!("Can't open the file {}: {}. Skiping...", path.display(), e);
+            return false;
+        }
+
+        let buffer_archive = BufReader::new(archive.unwrap());
+
+        let decoder = GzDecoder::new(buffer_archive);
+        let buffer_decoder = BufReader::new(decoder);
+
+        let mut tar = Archive::new(buffer_decoder);
+
+        let entries = tar.entries()
+            .expect("Error on get the entries of tar file");
+
+        for entrie in entries {
+
+            let file = entrie
+                .expect("Erro on get the entrie file");
+
+            let header = file.header().clone();
+
+            let full_path = &header.path()
+                .expect("Can't get the full path");
+
+            if FileTar::path_to_string(full_path, true) == ffile.full_path {
+
+                return copy(&mut BufReader::new(file), copy_to).is_ok();
+            }
+        }
+
+        false
     }
 }

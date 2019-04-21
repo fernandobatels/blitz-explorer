@@ -7,7 +7,7 @@
 ///
 
 use std::net::{TcpStream, SocketAddr};
-use std::io::{BufReader, BufRead, Write};
+use std::io::{BufReader, BufRead, Write, BufWriter};
 
 use files::catalog::Catalog;
 
@@ -28,10 +28,6 @@ impl Request {
 
         info!("Handling {}...", client);
 
-        if !Request::response(&conn, client, "Welcome to Blitz Archive Explorer.\nFor search the files send: /search/SEARCH HERE\n".to_string()) {
-            return;
-        }
-
         let mut command = String::new();
         let mut buf_reader = BufReader::new(&conn);
 
@@ -43,8 +39,10 @@ impl Request {
         let mut command_ok = false;
 
         if command.starts_with("/search/") {
-            let mut search = command.replace("/search/", "");
+
+            let mut search = command.replacen("/search/", "", 1);
             search = search.trim().to_string();
+
             if !search.is_empty() {
 
                 for tar in catalog.get_catalogs() {
@@ -54,6 +52,47 @@ impl Request {
                         if file.file_name.contains(search.as_str()) {
                             Request::response(&conn, client, format!("{}:{}\n", tar.file_name.clone(), file.full_path.clone()));
                         }
+                    }
+                }
+
+                command_ok = true;
+            }
+
+        } else if command.starts_with("/download/") && command.contains(":") {
+
+            let mut download = command.replacen("/download/", "", 1);
+            download = download.trim().to_string();
+            if !download.is_empty() {
+                let mut download_slices = download.split(":");
+
+                let tar_file = download_slices.next();
+                if tar_file.is_none() {
+                    error!("Tar file not setted: {}", download);
+                    return;
+                }
+
+                let name_file = download_slices.next();
+                if name_file.is_none() {
+                    error!("Name of file not setted: {}", download);
+                    return;
+                }
+
+                for tar in catalog.get_catalogs() {
+
+                    if tar.file_name == tar_file.unwrap() {
+
+                        for file in catalog.get_catalog(&tar) {
+
+                            if file.full_path == name_file.unwrap() {
+
+                                if !Catalog::extract_file(&tar, &file, &mut BufWriter::new(&conn)) {
+                                    error!("Error on extract: {}", download);
+                                    return;
+                                }
+                                break;
+                            }
+                        }
+                        break;
                     }
                 }
 
