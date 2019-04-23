@@ -10,11 +10,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::sync::mpsc::channel;
 use std::fs;
+use std::ffi::OsStr;
 use std::env;
 use std::panic;
 use std::thread;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 #[macro_use]
 extern crate log;
@@ -24,10 +26,14 @@ extern crate flate2;
 extern crate sled;
 extern crate serde;
 extern crate tar;
+extern crate fuse;
+extern crate libc;
+extern crate time;
 
 use simplelog::{SimpleLogger, LevelFilter, Config};
 use sled::Db;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, DebouncedEvent};
+use fuse::mount;
 
 mod catalog;
 mod tcp;
@@ -36,7 +42,7 @@ mod filesystem;
 use catalog::catalog::Catalog;
 use catalog::file::FileTar;
 use tcp::request::Request;
-use filesystem::filesystem::Filesystem;
+use filesystem::filesystem::TarInterface;
 
 const DB_INDEX: &str = "/var/db/blitzae";
 const TCP_BIND: &str = "127.0.0.1:3355";
@@ -53,6 +59,9 @@ fn main() {
 
     let input_folder_str = env::args().nth(1)
         .expect("Argument 1 needs to be the input folder");
+
+    let mountpoint = env::args().nth(2)
+        .expect("Argument 2 needs to be the mountpoint of the output content");
 
     let input_folder = fs::read_dir(Path::new(&input_folder_str))
         .expect("Error on read the input folder");
@@ -84,14 +93,14 @@ fn main() {
     watcher.watch(input_folder_str.clone(), RecursiveMode::NonRecursive)
         .expect("Failed to watch for changes on the input folder!");
 
-    let catalog_fs = catalog.clone();
-    let thread_fs = thread::spawn(move || {
+    let catalog_indx = catalog.clone();
+    let thread_indx = thread::spawn(move || {
         info!("Waiting for changes in {}...", input_folder_str);
         loop {
             let change = rx.recv()
                 .expect("Error on recv the change event");
 
-            let mut catalog_aux = catalog_fs.lock()
+            let mut catalog_aux = catalog_indx.lock()
                 .expect("Error on lock the catalog for file system");
 
             let (change_path, burn_path): (Option<PathBuf>, Option<PathBuf>) = match change {
@@ -132,8 +141,27 @@ fn main() {
         }
     });
 
-    thread_fs.join()
-        .expect("Error on filesystem watcher thread");
+    let catalog_fs = catalog.clone();
+    let thread_fs = thread::spawn(move || {
+
+        let mut catalog_aux = catalog_fs.lock()
+            .expect("Error on lock the catalog for tcp server");
+
+        let tar_interface = TarInterface {
+            catalog: &mut catalog_aux,
+            inodes: &mut HashMap::new()
+        };
+
+        let options: Vec<&OsStr> = vec![OsStr::new("-o"), OsStr::new("ro"), OsStr::new("-o"), OsStr::new("fsname=blitzae")];
+
+        mount(tar_interface, &mountpoint, &options)
+            .expect("Error on mount the fuse");
+    });
+
+    thread_indx.join()
+        .expect("Error on indexer thread");
     thread_tcp.join()
-        .expect("Error on tcp watcher thread");
+        .expect("Error on tcp thread");
+    thread_fs.join()
+        .expect("Error on fuse thread");
 }
