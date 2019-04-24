@@ -82,7 +82,9 @@ impl Catalog {
                 mtime: header.mtime()
                     .expect("Can't determine de mtime"),
                 size: header.size()
-                    .expect("Can't determine de size")
+                    .expect("Can't determine de size"),
+                is_file: header.entry_type().is_file(),
+                level_path: FileTar::path_to_string(full_path, true).matches("/").count()
             };
 
             let data = serde_json::to_string(&indexed_file)
@@ -105,7 +107,7 @@ impl Catalog {
     // of a file
     fn get_tree(&mut self, tar: &FileTar) -> Arc<Tree> {
 
-        let files = self.db.open_tree(tar.full_path.clone())
+        let files = self.db.open_tree(tar.file_name.clone())
                 .expect("Can't open the file tree");
 
         return files;

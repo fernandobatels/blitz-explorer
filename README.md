@@ -4,7 +4,7 @@ Service for search and get files inside a multiples .tar.gz files
 
 ## TCP Server
 
-Search and download the indexed files inside of yours tar.gz files connection on the TCP server.
+Search and download the indexed files inside of yours tar.gz files over a tpc connection.
 
 The protocol basically have two only commands: /search and /download
 
@@ -44,6 +44,6 @@ Now you can use File Manager(like the Dolphin) for access yours files or just us
 To unmount your "tars" file system:
 
 ```bash
-fusermount -u /tmp/aqui9
+fusermount -u /tmp/mytars
 ```
 

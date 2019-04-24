@@ -11,22 +11,23 @@ use std::ffi::OsStr;
 use std::collections::HashMap;
 
 use libc::ENOENT;
-use time;
+use time::{self, Timespec};
 use fuse::{FileType, FileAttr, Filesystem, Request, ReplyEntry, ReplyAttr, ReplyDirectory};
 
 use catalog::catalog::Catalog;
+use catalog::file::{File, FileTar};
 
 pub struct TarInterface<'a> {
     pub catalog: &'a mut Catalog,
-    pub inodes: &'a mut HashMap<(u64, String), u64> // (parent ino, name of file) => ino of file
+    pub inodes: &'a mut HashMap<(u64, String), (u64, File)> // (parent ino, name of file) => (ino of file, File)
 }
 
 const DELIMITATOR_INOS_TARS: u64 = 1000;
 
 impl<'a> TarInterface<'a> {
 
-    // Build the FileAttr values
-    fn file_attr(ino: u64) -> FileAttr {
+    // Build the default FileAttr values
+    fn def_file_attr(ino: u64) -> FileAttr {
 
         FileAttr {
             ino: ino,
@@ -45,6 +46,19 @@ impl<'a> TarInterface<'a> {
             flags: 0,
         }
     }
+
+    // Build the default value for File
+    fn def_file(name: String, is_file: bool) -> File {
+
+        File {
+            full_path: name.clone(),
+            file_name: name.clone(),
+            mtime: 0,
+            size: 0,
+            is_file: is_file,
+            level_path: 1
+        }
+    }
 }
 
 impl<'a> Filesystem for TarInterface<'a> {
@@ -57,20 +71,23 @@ impl<'a> Filesystem for TarInterface<'a> {
 
         info!("lookup: {} {}", parent, name);
 
-        let ino = self.inodes.get(&(parent, name))
-            .expect("Inode not found!");
+        let ino_file_parent = (parent, TarInterface::def_file("".to_string(), false));
 
-        // For list the tar.gz files
-        if parent < DELIMITATOR_INOS_TARS {
+        let (ino, file) = match self.inodes.get(&(parent, name)) {
+            Some(aux) => aux,
+            None => &ino_file_parent
+        };
 
-            let attr = TarInterface::file_attr(*ino);
+        let mut attr = TarInterface::def_file_attr(*ino);
 
-            reply.entry(&time::now().to_timespec(), &attr, 0);
-
-            return;
+        if file.is_file {
+            attr.kind = FileType::RegularFile;
         }
 
-        reply.error(ENOENT);
+        attr.mtime = Timespec::new(file.mtime as i64, 0);
+        attr.size = file.size;
+
+        reply.entry(&time::now().to_timespec(), &attr, 0);
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
@@ -79,7 +96,7 @@ impl<'a> Filesystem for TarInterface<'a> {
         // Root path of the mounted dir
         if ino == 1 {
 
-            reply.attr(&time::now().to_timespec(), &TarInterface::file_attr(ino));
+            reply.attr(&time::now().to_timespec(), &TarInterface::def_file_attr(ino));
 
             return;
         }
@@ -92,18 +109,61 @@ impl<'a> Filesystem for TarInterface<'a> {
         // TODO: Paginate this!
         if offset == 0 {
 
-            reply.add(ino + 1, 1, FileType::Directory, ".");
-            self.inodes.insert((ino, ".".to_string()), ino + 1);
-            reply.add(ino + 1, 1, FileType::Directory, "..");
-            self.inodes.insert((ino, "..".to_string()), ino + 1);
+            let mut files: Vec<File> = vec![];
+            let mut next_ino = 0;
 
-            let mut i = 2;
+            files.push(TarInterface::def_file(".".to_string(), false));
+            files.push(TarInterface::def_file("..".to_string(), false));
 
-            for entry in self.catalog.get_catalogs() {
-                reply.add(ino + i, i as i64, FileType::Directory, entry.file_name.clone());
-                self.inodes.insert((ino, entry.file_name), ino + 1);
-                i = i + 1;
+            if ino == 1 {
+                // Root dir
+
+                for tar in self.catalog.get_catalogs() {
+                    files.push(TarInterface::def_file(tar.file_name, false));
+                }
+
+            } else if ino < DELIMITATOR_INOS_TARS {
+                // Inside a tar file
+
+                let mut file_name: Option<String> = None;
+
+                for (key, val) in self.inodes.iter() {
+                    if val.0 == ino {
+                        file_name = Some(key.1.clone());
+                        break;
+                    }
+                }
+
+                if let Some(file_name_tar) = file_name {
+
+                    let tar = FileTar {
+                        file_name: file_name_tar.clone(),
+                        full_path: file_name_tar
+                    };
+
+                    for file in self.catalog.get_catalog(&tar) {
+                        if file.level_path == 1 {
+                            files.push(file);
+                        }
+                    }
+
+                    next_ino = DELIMITATOR_INOS_TARS;
+                }
             }
+
+            for entry in files {
+
+                if entry.is_file {
+                    reply.add(ino + next_ino, next_ino as i64, FileType::Directory, entry.file_name.clone());
+                } else {
+                    reply.add(ino + next_ino, next_ino as i64, FileType::RegularFile, entry.file_name.clone());
+                }
+
+                self.inodes.insert((ino, entry.file_name.clone()), (ino + next_ino, entry));
+
+                next_ino = next_ino + 1;
+            }
+
         }
 
         reply.ok();
