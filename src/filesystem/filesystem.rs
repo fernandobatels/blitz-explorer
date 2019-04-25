@@ -19,10 +19,9 @@ use catalog::file::{File, FileTar};
 
 pub struct TarInterface<'a> {
     pub catalog: &'a mut Catalog,
-    pub inodes: &'a mut HashMap<(u64, String), (u64, File)> // (parent ino, name of file) => (ino of file, File)
+    pub inodes: &'a mut HashMap<(u64, String), (u64, File)>, // (parent ino, name of file) => (ino of file, File)
+    pub itars: &'a mut HashMap<u64, String> // ino of file => tar parent
 }
-
-const DELIMITATOR_INOS_TARS: u64 = 1000;
 
 impl<'a> TarInterface<'a> {
 
@@ -69,8 +68,6 @@ impl<'a> Filesystem for TarInterface<'a> {
             .expect("Error on OsStr to String")
             .to_string();
 
-        info!("lookup: {} {}", parent, name);
-
         let ino_file_parent = (parent, TarInterface::def_file("".to_string(), false));
 
         let (ino, file) = match self.inodes.get(&(parent, name)) {
@@ -111,6 +108,7 @@ impl<'a> Filesystem for TarInterface<'a> {
 
             let mut files: Vec<File> = vec![];
             let mut next_ino = 0;
+            let mut file_name_tar: Option<String> = None;
 
             files.push(TarInterface::def_file(".".to_string(), false));
             files.push(TarInterface::def_file("..".to_string(), false));
@@ -122,32 +120,52 @@ impl<'a> Filesystem for TarInterface<'a> {
                     files.push(TarInterface::def_file(tar.file_name, false));
                 }
 
-            } else if ino < DELIMITATOR_INOS_TARS {
-                // Inside a tar file
+            } else  {
+                // Inside a tar file or a internal folder
+                let mut level_filter: usize = 1;
+                let mut path_filter = "".to_string();
 
-                let mut file_name: Option<String> = None;
+                if let Some(tar_name) = self.itars.get(&ino) {
+                    // Internal folder
+                    file_name_tar = Some(tar_name.to_string());
 
-                for (key, val) in self.inodes.iter() {
-                    if val.0 == ino {
-                        file_name = Some(key.1.clone());
-                        break;
-                    }
-                }
-
-                if let Some(file_name_tar) = file_name {
-
-                    let tar = FileTar {
-                        file_name: file_name_tar.clone(),
-                        full_path: file_name_tar
-                    };
-
-                    for file in self.catalog.get_catalog(&tar) {
-                        if file.level_path == 1 {
-                            files.push(file);
+                    for (_key, val) in self.inodes.iter() {
+                        if val.0 == ino {
+                            level_filter = (val.1.level_path + 1).clone();
+                            path_filter = (&val.1).full_path.clone();
+                            break;
                         }
                     }
 
-                    next_ino = DELIMITATOR_INOS_TARS;
+                    if path_filter.ends_with(".") {
+                        level_filter = 1;
+                        path_filter = "".to_string();
+                    }
+
+                } else {
+                    // Folder inside the tar
+
+                    for (key, val) in self.inodes.iter() {
+                        if val.0 == ino {
+                            file_name_tar = Some(key.1.clone());
+                            break;
+                        }
+                    }
+                }
+
+                if let Some(tar_name) = file_name_tar.clone() {
+
+                    let tar = FileTar {
+                        file_name: tar_name.clone(),
+                        full_path: tar_name
+                    };
+
+                    // TODO: Make this more fast!
+                    for file in self.catalog.get_catalog(&tar) {
+                        if file.level_path == level_filter && file.full_path.starts_with(&path_filter) {
+                            files.push(file);
+                        }
+                    }
                 }
             }
 
@@ -160,6 +178,10 @@ impl<'a> Filesystem for TarInterface<'a> {
                 }
 
                 self.inodes.insert((ino, entry.file_name.clone()), (ino + next_ino, entry));
+
+                if let Some(tar_name) = file_name_tar.clone() {
+                    self.itars.insert(ino + next_ino, tar_name);
+                }
 
                 next_ino = next_ino + 1;
             }

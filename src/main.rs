@@ -149,7 +149,8 @@ fn main() {
 
         let tar_interface = TarInterface {
             catalog: &mut catalog_aux,
-            inodes: &mut HashMap::new()
+            inodes: &mut HashMap::new(),
+            itars: &mut HashMap::new()
         };
 
         let options: Vec<&OsStr> = vec![OsStr::new("-o"), OsStr::new("ro"), OsStr::new("-o"), OsStr::new("fsname=blitzae")];
