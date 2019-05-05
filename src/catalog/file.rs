@@ -17,7 +17,8 @@ pub struct File {
     pub file_name: String,
     pub full_path: String,
     pub is_file: bool,
-    pub level_path: usize
+    pub level_path: usize,
+    pub ino: u64
 }
 
 pub struct FileTar {

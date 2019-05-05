@@ -55,7 +55,8 @@ impl<'a> TarInterface<'a> {
             mtime: 0,
             size: 0,
             is_file: is_file,
-            level_path: 1
+            level_path: 1,
+            ino: 2
         }
     }
 }
@@ -103,11 +104,12 @@ impl<'a> Filesystem for TarInterface<'a> {
 
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: i64, mut reply: ReplyDirectory) {
 
+        info!("{}", ino);
+
         // TODO: Paginate this!
         if offset == 0 {
 
             let mut files: Vec<File> = vec![];
-            let mut next_ino = 0;
             let mut file_name_tar: Option<String> = None;
 
             files.push(TarInterface::def_file(".".to_string(), false));
@@ -115,9 +117,13 @@ impl<'a> Filesystem for TarInterface<'a> {
 
             if ino == 1 {
                 // Root dir
+                let mut ino = 2;
 
                 for tar in self.catalog.get_catalogs() {
-                    files.push(TarInterface::def_file(tar.file_name, false));
+                    let mut tarf = TarInterface::def_file(tar.file_name, false);
+                    tarf.ino = ino;
+                    files.push(tarf);
+                    ino = ino + 1;
                 }
 
             } else  {
@@ -171,19 +177,19 @@ impl<'a> Filesystem for TarInterface<'a> {
 
             for entry in files {
 
+                let next_ino = entry.ino;
+
                 if entry.is_file {
-                    reply.add(ino + next_ino, next_ino as i64, FileType::Directory, entry.file_name.clone());
+                    reply.add(next_ino, next_ino as i64, FileType::Directory, entry.file_name.clone());
                 } else {
-                    reply.add(ino + next_ino, next_ino as i64, FileType::RegularFile, entry.file_name.clone());
+                    reply.add(next_ino, next_ino as i64, FileType::RegularFile, entry.file_name.clone());
                 }
 
-                self.inodes.insert((ino, entry.file_name.clone()), (ino + next_ino, entry));
+                self.inodes.insert((ino, entry.file_name.clone()), (next_ino, entry));
 
                 if let Some(tar_name) = file_name_tar.clone() {
-                    self.itars.insert(ino + next_ino, tar_name);
+                    self.itars.insert(next_ino, tar_name);
                 }
-
-                next_ino = next_ino + 1;
             }
 
         }

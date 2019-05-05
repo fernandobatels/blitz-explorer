@@ -76,6 +76,8 @@ impl Catalog {
             let full_path = &header.path()
                 .expect("Can't get the full path");
 
+            let ino = self.get_last_ino() + 1;
+
             let indexed_file = IndexedFile {
                 full_path: FileTar::path_to_string(full_path, true),
                 file_name: FileTar::path_to_string(full_path, false),
@@ -84,7 +86,8 @@ impl Catalog {
                 size: header.size()
                     .expect("Can't determine de size"),
                 is_file: header.entry_type().is_file(),
-                level_path: FileTar::path_to_string(full_path, true).matches("/").count()
+                level_path: FileTar::path_to_string(full_path, true).matches("/").count(),
+                ino: ino
             };
 
             let data = serde_json::to_string(&indexed_file)
@@ -93,6 +96,8 @@ impl Catalog {
 
             tree.set(FileTar::path_to_string(full_path, true).as_bytes(), data.as_bytes().to_vec())
                 .expect("Error on create index for a file");
+
+            self.set_last_ino(ino);
         }
 
         self.db.flush()
@@ -107,10 +112,34 @@ impl Catalog {
     // of a file
     fn get_tree(&mut self, tar: &FileTar) -> Arc<Tree> {
 
-        let files = self.db.open_tree(tar.file_name.clone())
+        let files = self.db.open_tree(format!("tar::{}", tar.file_name.clone()))
                 .expect("Can't open the file tree");
 
         return files;
+    }
+
+    // Update the last used ino on files
+    fn set_last_ino(&mut self, ino: u64) {
+
+        self.db.set("last_ino".to_string(), ino.to_string().as_bytes().to_vec())
+            .expect("Error on update the last ino");
+    }
+
+    // Return the last used ino on files
+    fn get_last_ino(&mut self) -> u64 {
+
+        if let Ok(valop) = self.db.get("last_ino".to_string()) {
+            if let Some(val) = valop {
+                let inostr = str::from_utf8(&val)
+                    .expect("Error on get last ino from db");
+
+                if let Ok(ino) = inostr.parse::<u64>() {
+                    return ino;
+                }
+            }
+        }
+
+        return 2000;
     }
 
     // Return the indexed files inside of the tar
@@ -142,7 +171,13 @@ impl Catalog {
             let cat = str::from_utf8(&ucat)
                 .expect("Error on get string ut8 from catalog key");
 
-            let path_buf = PathBuf::from(cat);
+            if !cat.starts_with("tar::") {
+                continue;
+            }
+
+            let catn = cat.replacen("tar::", "", 1);
+
+            let path_buf = PathBuf::from(catn);
 
             cats.push(FileTar::from_path(path_buf.as_path()));
         }
