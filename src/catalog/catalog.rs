@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::io::{BufReader, BufWriter, Write, copy};
 use std::sync::Arc;
 use std::str;
+use std::collections::{HashMap, LinkedList};
 
 use flate2::read::GzDecoder;
 use tar::Archive;
@@ -66,6 +67,16 @@ impl Catalog {
 
         let tree = self.get_tree(&ftar);
 
+        let mut parents_inos: HashMap<String, (u64, LinkedList<u64>)> = HashMap::new();
+
+        { // Root dir of tar file
+            let ino = self.get_last_ino() + 1;
+
+            parents_inos.insert("".to_string(), (ino, LinkedList::new()));
+
+            self.set_last_ino(ino);
+        }
+
         for file in entries {
 
             let header = file
@@ -78,15 +89,36 @@ impl Catalog {
 
             let ino = self.get_last_ino() + 1;
 
+            let full_path_str = FileTar::path_to_string(full_path, true);
+            let file_name_str = FileTar::path_to_string(full_path, false);
+
+            let mut level = full_path_str.clone().matches("/").count();
+
+            if header.entry_type().is_file() {
+                level = level + 1;
+            }
+
+            let parent_n = full_path_str.rfind(file_name_str.as_str())
+                .expect("Error on get the pos of file name");
+            let parent = &full_path_str.clone()[..parent_n];
+
+            if header.entry_type().is_dir() && !parents_inos.contains_key(&full_path_str) {
+                parents_inos.insert(full_path_str.clone(), (ino, LinkedList::new()));
+            }
+
+            if let Some(parent_list) = parents_inos.get_mut(parent) {
+                parent_list.1.push_back(ino);
+            }
+
             let indexed_file = IndexedFile {
-                full_path: FileTar::path_to_string(full_path, true),
-                file_name: FileTar::path_to_string(full_path, false),
+                full_path: full_path_str,
+                file_name: file_name_str,
                 mtime: header.mtime()
                     .expect("Can't determine de mtime"),
                 size: header.size()
                     .expect("Can't determine de size"),
                 is_file: header.entry_type().is_file(),
-                level_path: FileTar::path_to_string(full_path, true).matches("/").count(),
+                level_path: level,
                 ino: ino
             };
 
@@ -98,6 +130,14 @@ impl Catalog {
                 .expect("Error on create index for a file");
 
             self.set_last_ino(ino);
+        }
+
+        for (_parent, inos) in parents_inos {
+            let files = self.get_tree_inos(inos.0);
+            for file in inos.1 {
+                files.set(file.to_string().as_bytes(), file.to_string().as_bytes().to_vec())
+                    .expect("Error on set the index tree ino");
+            }
         }
 
         self.db.flush()
@@ -116,6 +156,16 @@ impl Catalog {
                 .expect("Can't open the file tree");
 
         return files;
+    }
+
+    // Return the sled Tree object for access the indexed content
+    // of a ino tree cache
+    fn get_tree_inos(&mut self, ino: u64) -> Arc<Tree> {
+
+        let internal_files = self.db.open_tree(format!("inotree::{}", ino))
+                .expect("Can't open the ino tree");
+
+        return internal_files;
     }
 
     // Update the last used ino on files
@@ -139,7 +189,30 @@ impl Catalog {
             }
         }
 
-        return 2000;
+        return 20000;
+    }
+
+    // Return the childs of the ino
+    pub fn get_files_inos(&mut self, ino: u64) -> Vec<u64> {
+
+        let sub_inos = self.get_tree_inos(ino);
+
+        let mut files: Vec<u64> = vec![];
+
+        for val in sub_inos.iter().values() {
+
+            let uval = val.expect("Error on get the val of indexed ino");
+
+            let sub_ino_str = str::from_utf8(&uval)
+                .expect("Error on get string ut8 from indexed ino");
+
+            let sub_ino = sub_ino_str.parse::<u64>()
+                .expect("Error on parse the ino str");
+
+            files.push(sub_ino);
+        }
+
+        files
     }
 
     // Return the indexed files inside of the tar

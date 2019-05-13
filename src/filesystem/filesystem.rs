@@ -47,7 +47,7 @@ impl<'a> TarInterface<'a> {
     }
 
     // Build the default value for File
-    fn def_file(name: String, is_file: bool) -> File {
+    fn def_file(name: String, is_file: bool, ino: u64) -> File {
 
         File {
             full_path: name.clone(),
@@ -56,7 +56,7 @@ impl<'a> TarInterface<'a> {
             size: 0,
             is_file: is_file,
             level_path: 1,
-            ino: 2
+            ino: ino
         }
     }
 }
@@ -69,7 +69,7 @@ impl<'a> Filesystem for TarInterface<'a> {
             .expect("Error on OsStr to String")
             .to_string();
 
-        let ino_file_parent = (parent, TarInterface::def_file("".to_string(), false));
+        let ino_file_parent = (parent, TarInterface::def_file("".to_string(), false, 1));
 
         let (ino, file) = match self.inodes.get(&(parent, name)) {
             Some(aux) => aux,
@@ -104,78 +104,47 @@ impl<'a> Filesystem for TarInterface<'a> {
 
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: i64, mut reply: ReplyDirectory) {
 
-        info!("{}", ino);
-
         // TODO: Paginate this!
         if offset == 0 {
 
-            let mut files: Vec<File> = vec![];
-            let mut file_name_tar: Option<String> = None;
-
-            files.push(TarInterface::def_file(".".to_string(), false));
-            files.push(TarInterface::def_file("..".to_string(), false));
+            let mut files: Vec<(File, String)> = vec![];
 
             if ino == 1 {
                 // Root dir
-                let mut ino = 2;
+                let mut ino_tar = 2;
 
                 for tar in self.catalog.get_catalogs() {
-                    let mut tarf = TarInterface::def_file(tar.file_name, false);
-                    tarf.ino = ino;
-                    files.push(tarf);
-                    ino = ino + 1;
+                    files.push((TarInterface::def_file(tar.file_name.clone(), false, ino_tar), tar.file_name.to_string()));
+                    ino_tar = ino_tar + 1;
                 }
 
-            } else  {
+            } else if let Some(tar_name) = self.itars.get(&ino) {
                 // Inside a tar file or a internal folder
-                let mut level_filter: usize = 1;
-                let mut path_filter = "".to_string();
 
-                if let Some(tar_name) = self.itars.get(&ino) {
-                    // Internal folder
-                    file_name_tar = Some(tar_name.to_string());
+                let tar = FileTar {
+                    file_name: tar_name.clone(),
+                    full_path: tar_name.clone()
+                };
 
-                    for (_key, val) in self.inodes.iter() {
-                        if val.0 == ino {
-                            level_filter = (val.1.level_path + 1).clone();
-                            path_filter = (&val.1).full_path.clone();
-                            break;
+                let catalog = self.catalog.get_catalog(&tar);
+
+                if ino >= 20000 {
+                    let inos_filter = self.catalog.get_files_inos(ino);
+                    for file in catalog {
+                        if inos_filter.contains(&file.ino) {
+                            files.push((file, tar_name.to_string()));
                         }
                     }
-
-                    if path_filter.ends_with(".") {
-                        level_filter = 1;
-                        path_filter = "".to_string();
-                    }
-
                 } else {
-                    // Folder inside the tar
-
-                    for (key, val) in self.inodes.iter() {
-                        if val.0 == ino {
-                            file_name_tar = Some(key.1.clone());
-                            break;
-                        }
-                    }
-                }
-
-                if let Some(tar_name) = file_name_tar.clone() {
-
-                    let tar = FileTar {
-                        file_name: tar_name.clone(),
-                        full_path: tar_name
-                    };
-
-                    // TODO: Make this more fast!
-                    for file in self.catalog.get_catalog(&tar) {
-                        if file.level_path == level_filter && file.full_path.starts_with(&path_filter) {
-                            files.push(file);
+                    for file in catalog {
+                        if file.level_path == 1 {
+                            files.push((file, tar_name.to_string()));
                         }
                     }
                 }
             }
 
-            for entry in files {
+            for (entry, tar_name) in files {
 
                 let next_ino = entry.ino;
 
@@ -187,7 +156,7 @@ impl<'a> Filesystem for TarInterface<'a> {
 
                 self.inodes.insert((ino, entry.file_name.clone()), (next_ino, entry));
 
-                if let Some(tar_name) = file_name_tar.clone() {
+                if !tar_name.is_empty() {
                     self.itars.insert(next_ino, tar_name);
                 }
             }

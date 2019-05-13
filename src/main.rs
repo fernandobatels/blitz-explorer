@@ -145,7 +145,7 @@ fn main() {
     let thread_fs = thread::spawn(move || {
 
         let mut catalog_aux = catalog_fs.lock()
-            .expect("Error on lock the catalog for tcp server");
+            .expect("Error on lock the catalog for fuse");
 
         let tar_interface = TarInterface {
             catalog: &mut catalog_aux,
