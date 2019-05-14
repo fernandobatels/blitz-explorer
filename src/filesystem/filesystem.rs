@@ -9,6 +9,7 @@
 
 use std::ffi::OsStr;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use libc::ENOENT;
 use time::{self, Timespec};
@@ -18,7 +19,7 @@ use catalog::catalog::Catalog;
 use catalog::file::{File, FileTar};
 
 pub struct TarInterface<'a> {
-    pub catalog: &'a mut Catalog,
+    pub catalog: &'a mut Arc<Mutex<Catalog>>,
     pub inodes: &'a mut HashMap<(u64, String), (u64, File)>, // (parent ino, name of file) => (ino of file, File)
     pub itars: &'a mut HashMap<u64, String> // ino of file => tar parent
 }
@@ -108,12 +109,14 @@ impl<'a> Filesystem for TarInterface<'a> {
         if offset == 0 {
 
             let mut files: Vec<(File, String)> = vec![];
+            let mut catalog = self.catalog.lock()
+                .expect("Error on lock the catalog for fuse");
 
             if ino == 1 {
                 // Root dir
                 let mut ino_tar = 2;
 
-                for tar in self.catalog.get_catalogs() {
+                for tar in catalog.get_catalogs() {
                     files.push((TarInterface::def_file(tar.file_name.clone(), false, ino_tar), tar.file_name.to_string()));
                     ino_tar = ino_tar + 1;
                 }
@@ -126,17 +129,17 @@ impl<'a> Filesystem for TarInterface<'a> {
                     full_path: tar_name.clone()
                 };
 
-                let catalog = self.catalog.get_catalog(&tar);
+                let catalog_files = catalog.get_catalog(&tar);
 
                 if ino >= 20000 {
-                    let inos_filter = self.catalog.get_files_inos(ino);
-                    for file in catalog {
+                    let inos_filter = catalog.get_files_inos(ino);
+                    for file in catalog_files {
                         if inos_filter.contains(&file.ino) {
                             files.push((file, tar_name.to_string()));
                         }
                     }
                 } else {
-                    for file in catalog {
+                    for file in catalog_files {
                         if file.level_path == 1 {
                             files.push((file, tar_name.to_string()));
                         }
