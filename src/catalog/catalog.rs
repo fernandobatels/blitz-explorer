@@ -8,7 +8,7 @@
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::io::{BufReader, BufWriter, Write, copy};
+use std::io::{BufReader, BufWriter, copy};
 use std::sync::Arc;
 use std::str;
 use std::collections::{HashMap, LinkedList};
@@ -152,7 +152,7 @@ impl Catalog {
     // of a file
     fn get_tree(&mut self, tar: &FileTar) -> Arc<Tree> {
 
-        let files = self.db.open_tree(format!("tar::{}", tar.file_name.clone()))
+        let files = self.db.open_tree(format!("tar::{}", tar.full_path.clone()))
                 .expect("Can't open the file tree");
 
         return files;
@@ -287,12 +287,12 @@ impl Catalog {
     }
 
     // Extract a file from .tar file
-    pub fn extract_file<W: Write>(&self, ftar: &FileTar, ffile: &IndexedFile, copy_to: &mut BufWriter<W>) -> bool {
+    pub fn extract_file(&self, ftar: &FileTar, ffile: &IndexedFile) -> Option<File> {
 
         let (is_cached, cache) = self.cached_file(ftar, ffile);
 
         if is_cached {
-            return copy(&mut BufReader::new(cache), copy_to).is_ok();
+            return Some(cache);
         }
 
         let path = Path::new(&ftar.full_path);
@@ -300,7 +300,7 @@ impl Catalog {
 
         if let Err(e) = archive {
             error!("Can't open the file {}: {}. Skiping...", path.display(), e);
-            return false;
+            return None;
         }
 
         let buffer_archive = BufReader::new(archive.unwrap());
@@ -330,17 +330,17 @@ impl Catalog {
                     .expect("Error on make the cache");
 
                 // We get the content from cache
-                return self.extract_file(ftar, ffile, copy_to);
+                return self.extract_file(ftar, ffile);
             }
         }
 
-        false
+        return None;
     }
 
     // Return the cache of indexed file, if exists
     fn cached_file(&self, ftar: &FileTar, ffile: &IndexedFile) -> (bool, File) {
 
-        let cached_name = format!("{}/{}_{}", self.cache_extract, ftar.file_name, ffile.full_path.replace("/", ""));
+        let cached_name = format!("{}/{}_{}", self.cache_extract, ftar.file_name, ffile.full_path.replace("/", "_"));
 
         let path = Path::new(&cached_name);
 

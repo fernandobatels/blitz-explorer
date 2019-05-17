@@ -52,3 +52,14 @@ impl FileTar {
             .to_string();
     }
 }
+
+impl Clone for FileTar {
+    
+    fn clone(&self) -> Self {
+        FileTar {
+            file_name: self.file_name.clone(),
+            full_path: self.full_path.clone()
+        }
+    }
+
+}

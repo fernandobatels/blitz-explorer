@@ -7,7 +7,7 @@
 ///
 
 use std::net::{TcpStream, SocketAddr};
-use std::io::{BufReader, BufRead, Write, BufWriter};
+use std::io::{BufReader, BufRead, Write, BufWriter, copy};
 
 use catalog::catalog::Catalog;
 
@@ -84,8 +84,12 @@ impl Request {
                         for file in catalog.get_catalog(&tar) {
 
                             if file.full_path == name_file.unwrap() {
-
-                                if !catalog.extract_file(&tar, &file, &mut BufWriter::new(&conn)) {
+                                if let Some(extracted) = catalog.extract_file(&tar, &file) {
+                                    if copy(&mut BufReader::new(extracted), &mut BufWriter::new(&conn)).is_err() {
+                                        error!("Error on write on buffer: {}", download);
+                                        return;
+                                    }
+                                } else {
                                     error!("Error on extract: {}", download);
                                     return;
                                 }
