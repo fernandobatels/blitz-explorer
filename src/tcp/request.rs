@@ -1,5 +1,5 @@
 ///
-/// Blitz Archiving Explorer
+/// Blitz Explorer
 ///
 /// Request on the tcp server
 ///

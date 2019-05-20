@@ -1,5 +1,5 @@
 ///
-/// Blitz Archiving Explorer
+/// Blitz Explorer
 ///
 /// The interface of the filesystem. With this the user can access
 /// the content of tar.gz files

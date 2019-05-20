@@ -1,5 +1,5 @@
 ///
-/// Blitz Archiving Explorer
+/// Blitz Explorer
 ///
 /// Main of the application
 ///
@@ -44,7 +44,7 @@ use catalog::file::FileTar;
 use tcp::request::Request;
 use filesystem::filesystem::TarInterface;
 
-const DB_INDEX: &str = "/var/db/blitzae";
+const DB_INDEX: &str = "/var/db/blitze";
 const TCP_BIND: &str = "127.0.0.1:3355";
 const CACHE_EXTRACT: &str = "/tmp";
 
@@ -62,6 +62,15 @@ fn main() {
 
     let mountpoint = env::args().nth(2)
         .expect("Argument 2 needs to be the mountpoint of the output content");
+
+    let mut only_run: Option<bool> = None; // true = tcp, false = fuse, none = both
+    if let Some(on) = env::args().nth(3) {
+        if on == "--only-tcp" {
+            only_run = Some(true);
+        } else if on == "--only-fuse" {
+            only_run = Some(false);
+        }
+    }
 
     let input_folder = fs::read_dir(Path::new(&input_folder_str))
         .expect("Error on read the input folder");
@@ -129,6 +138,13 @@ fn main() {
 
     let catalog_tcp = catalog.clone();
     let thread_tcp = thread::spawn(move || {
+        
+        if let Some(on) = only_run {
+            if !on {
+                return;
+            }
+        }
+
         info!("Waiting for tcp connections in {}...", TCP_BIND);
         for stream in tcp_listener.incoming() {
 
@@ -143,6 +159,12 @@ fn main() {
 
     let mut catalog_fs = catalog.clone();
     let thread_fs = thread::spawn(move || {
+        
+        if let Some(on) = only_run {
+            if on {
+                return;
+            }
+        }
 
         let tar_interface = TarInterface {
             catalog: &mut catalog_fs,
@@ -150,7 +172,7 @@ fn main() {
             itars: &mut HashMap::new()
         };
 
-        let options: Vec<&OsStr> = vec![OsStr::new("-o"), OsStr::new("ro"), OsStr::new("-o"), OsStr::new("fsname=blitzae")];
+        let options: Vec<&OsStr> = vec![OsStr::new("-o"), OsStr::new("ro"), OsStr::new("-o"), OsStr::new("fsname=blitze")];
 
         mount(tar_interface, &mountpoint, &options)
             .expect("Error on mount the fuse");

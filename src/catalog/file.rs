@@ -1,5 +1,5 @@
 ///
-/// Blitz Archiving Explorer
+/// Blitz Explorer
 ///
 /// Representation of a indexed file and the tar file
 ///

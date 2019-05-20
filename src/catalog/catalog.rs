@@ -1,5 +1,5 @@
 ///
-/// Blitz Archiving Explorer
+/// Blitz Explorer
 ///
 /// Index/catalog of files content
 ///
