@@ -6,6 +6,8 @@
 
 Service for search and get files inside a multiples .tar.gz files, but without extract entire tar.gz file and with cache(of indexed files and extracted files) for fast access.
 
+![How works](how-works.gif)
+
 ## Starting the service
 
 For now we use the cargo to run and use the application(soon there will be a daemon):
